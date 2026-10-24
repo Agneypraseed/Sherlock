@@ -1,3 +1,11 @@
+import type { DatasetRecord } from '../shared/datasets'
+
+export type DatasetSaveState =
+  | { status: 'idle' }
+  | { status: 'saving' }
+  | { status: 'success'; dataset: DatasetRecord }
+  | { status: 'error'; message: string }
+
 export type FindingKind = 'duplicate' | 'label-conflict' | 'outlier'
 export type FindingFilter = 'all' | FindingKind
 export type ReviewDecision = 'unreviewed' | 'keep' | 'dismiss'

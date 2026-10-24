@@ -21,6 +21,7 @@ button {
   background: #2458a6;
 }
 button:hover { background: #1b4788; }
+button:disabled { cursor: not-allowed; opacity: 0.55; }
 button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible {
   outline: 3px solid #2458a6;
   outline-offset: 3px;
@@ -62,6 +63,12 @@ section { min-width: 0; padding: 1.5rem; background: white; border: 1px solid #d
 .status-label { padding: 0.3rem 0.6rem; border-radius: 4px; background: #eef2f7; color: #526071; font-size: 0.8rem; }
 .help-text { color: #526071; font-size: 0.85rem; }
 .file-label { display: block; font-weight: 600; margin-bottom: 0.5rem; }
+.dataset-fields { border: 0; padding: 0; margin: 0; min-width: 0; }
+#dataset-name { display: block; width: 100%; padding: 0.7rem; margin-bottom: 1.25rem; border: 1px solid #a4afbd; border-radius: 5px; }
+.save-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 1rem; margin-block: 1.25rem 0.5rem; }
+.save-success { padding: 1rem; margin-top: 1rem; background: #edf6ef; border-left: 3px solid #26733d; }
+.save-success p { margin: 0.4rem 0 0; }
+.error-message { padding: 0.8rem; margin-top: 1rem; color: #8b2020; background: #fff0f0; border-left: 3px solid #b12a2a; overflow-wrap: anywhere; }
 input[type='file'] { display: block; width: 100%; padding: 0.75rem; border: 1px dashed #a4afbd; border-radius: 5px; }
 input[type='file']::file-selector-button { padding: 0.4rem 0.7rem; margin-right: 1rem; font: inherit; cursor: pointer; }
 #file-selection-help { margin-top: 0.75rem; }

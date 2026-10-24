@@ -1,7 +1,9 @@
 # Architecture decisions and learning roadmap
 
-These are recommendations for the next phases. No backend, database, cloud
-resources, deployment, embeddings, or agent is implemented in this milestone.
+The React UI and Node/Fastify metadata API now run locally with PostgreSQL.
+`POST /api/datasets` saves a manifest atomically; `GET /api/datasets/:id` reads it.
+Cloud resources, byte uploads, deployment, embeddings, and the agent remain planned.
+See [the implemented API contract](api.md) and the README for local setup.
 
 ## Recommended stack
 
@@ -11,7 +13,7 @@ resources, deployment, embeddings, or agent is implemented in this milestone.
 | Application API | Node.js + TypeScript + Fastify | Fits your JS experience and the supplied architecture; owns auth, datasets, run lifecycle, and review decisions. |
 | Investigator | One agent using the OpenAI Agents SDK for TypeScript, in the Node backend | You implement tool definitions, instructions, evidence validation, and the run loop integration. |
 | ML service | Python + FastAPI + PyTorch/DINOv2 + NumPy + scikit-learn | A focused boundary for image decoding, embeddings, neighbors, and deterministic audit computations. |
-| Metadata | PostgreSQL, initially hosted by Supabase | Datasets, images, runs, findings, evidence, and reviews have relational structure and benefit from transactions. |
+| Metadata | PostgreSQL locally; Supabase recommended for hosting | Dataset and image metadata persistence is implemented. Runs, findings, evidence, and reviews follow later. |
 | Image/artifact storage | A private Supabase Storage bucket | Learn cloud object storage without adding another provider immediately. Store file bytes and embedding artifacts here. |
 | First hosted version | Render static site + Node web service + private Python service | Deploy frontend, application API, and ML service separately. Add a background worker when audits become long-running. |
 
@@ -118,7 +120,7 @@ The current demo UI proves none of these ML or agent quality claims.
 
 ## Deployment path
 
-1. Finish the local metadata API and persistence. Add the real frontend call.
+1. Implemented: local metadata API, PostgreSQL persistence, and the real frontend save request.
 2. Implement cloud upload/download with private objects, authentication, and
    server-side validation. Use short-lived signed URLs and limits on file size/count.
 3. Implement and evaluate deterministic ML checks locally. Measure RAM and latency.
