@@ -7,6 +7,7 @@ function AppHeader() {
           <a href="#dashboard">Dashboard</a>
           <a href="#dataset-upload">Dataset</a>
           <a href="#audit-findings">Findings</a>
+          <a href="#investigation">Investigation</a>
         </nav>
       </div>
     </header>
