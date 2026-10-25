@@ -119,6 +119,7 @@ this is a later reliability improvement, distinct from disabling double clicks.
 | `src/components/DatasetUploader.tsx` | Name/file form and idle/loading/success/error presentation. |
 | `src/components/FindingsPanel.tsx` | Demo filters, selection, and review status. |
 | `src/components/InvestigationPanel.tsx` | Static investigation plan and illustrative evidence. |
+| `src/components/Icon.tsx` | Small accessible SVG icons shared by the header, file picker, and empty states. |
 | `src/api/datasets.ts` | The first real `fetch` call, timeout, response checking, and error messages. |
 | `src/types.ts` | Frontend-only save/review/finding types and labels. |
 | `shared/datasets.ts` | Request/response types and limits used by the frontend and server. TypeScript types alone do not validate incoming JSON. |
@@ -133,7 +134,7 @@ this is a later reliability improvement, distinct from disabling double clicks.
 | `tsconfig.server.json` | Strict checking for server, shared contract, and scripts. |
 | `vite.config.ts` | React integration and development `/api` proxy. |
 | `src/data/demoFindings.ts` | Fictional fixtures, isolated from real dataset metadata. |
-| `src/index.css` | Plain responsive CSS and form feedback. |
+| `src/index.css` | Shared colors, spacing, typography, responsive layout, and form feedback. |
 | `index.html`, `src/main.tsx`, `src/App.tsx`, `AppHeader.tsx` | HTML entry, React mounting, shell, and navigation. |
 | `package.json`, `package-lock.json` | Scripts, runtime/dev dependencies, and locked versions. |
 | `tsconfig*.json`, `.oxlintrc.json`, `.gitignore` | Type checks, linting, and exclusions for secrets/data/builds. |

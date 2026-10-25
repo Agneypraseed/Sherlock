@@ -68,7 +68,6 @@ function Dashboard() {
           <h1>Dashboard</h1>
           <p>Inspect your image datasets and investigate potential problems.</p>
         </div>
-        <span className="help-text">Dataset workspace</span>
       </div>
       <DatasetUploader
         files={files}

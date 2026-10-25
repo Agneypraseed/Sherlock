@@ -1,5 +1,6 @@
 import { findingKindLabels, reviewDecisionLabels } from '../types'
 import type { Finding, FindingFilter, ReviewDecision } from '../types'
+import Icon from './Icon'
 
 interface FindingsPanelProps {
   findings: Finding[]
@@ -17,7 +18,7 @@ function FindingsPanel({
   onFilterChange, onSelectFinding, onToggleDemo,
 }: FindingsPanelProps) {
   return (
-    <section id="audit-findings" aria-labelledby="audit-findings-heading">
+    <section id="audit-findings" className="findings-panel" aria-labelledby="audit-findings-heading">
       <div className="section-heading">
         <div>
           <h2 id="audit-findings-heading">Findings</h2>
@@ -65,8 +66,9 @@ function FindingsPanel({
         </>
       ) : (
         <div className="empty-state">
+          <span className="empty-state-icon"><Icon name="file-search" size={40} /></span>
           <h3>No audit results yet</h3>
-          <p>Selecting files does not run an audit. Load the demo to explore the review interface.</p>
+          <p>Load the demo to explore the review interface.</p>
         </div>
       )}
       {/* TODO (you): Replace demo fixtures with findings from a completed audit run. */}

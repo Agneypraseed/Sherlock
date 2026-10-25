@@ -3,10 +3,10 @@ import type { Finding, ReviewDecision } from '../types'
 
 // A proposed plan, not a run log. No step invokes tools or a model.
 const investigationSteps = [
-  { title: 'Inspect dataset context', detail: 'Check labels, splits, image metadata, and the audit configuration.' },
-  { title: 'Retrieve supporting evidence', detail: 'Use deterministic tools to inspect hashes, embeddings, and nearest neighbors.' },
-  { title: 'Test alternative explanations', detail: 'Distinguish likely errors from valid rare examples and uncertain evidence.' },
-  { title: 'Present a recommendation', detail: 'Cite evidence and limitations, then ask a human to review any proposed dataset change.' },
+  { title: 'Inspect dataset context', detail: 'Check labels, splits, image metadata, and audit configuration.' },
+  { title: 'Retrieve supporting evidence', detail: 'Inspect hashes, embeddings, and nearest neighbors.' },
+  { title: 'Test alternative explanations', detail: 'Distinguish likely errors from valid rare examples.' },
+  { title: 'Present a recommendation', detail: 'Cite evidence and limitations for human review.' },
 ]
 
 interface InvestigationPanelProps {
@@ -17,20 +17,20 @@ interface InvestigationPanelProps {
 
 function InvestigationPanel({ finding, decision, onReview }: InvestigationPanelProps) {
   return (
-    <section id="investigation" aria-labelledby="investigation-heading">
+    <section id="investigation" className="investigation-panel" aria-labelledby="investigation-heading">
       <div className="section-heading">
         <div>
           <h2 id="investigation-heading">Investigation</h2>
           <p>One Investigator Agent, backed by verifiable tools.</p>
         </div>
       </div>
-      <p className="notice">Static plan · no agent is running and no model is called.</p>
+      <p className="plan-note"><span className="plan-dot" aria-hidden="true" />Static plan · no model is called.</p>
 
       <ol className="investigation-steps">
-        {investigationSteps.map((step) => (
+        {investigationSteps.map((step, index) => (
           <li key={step.title}>
-            <strong>{step.title}</strong>
-            <p>{step.detail}</p>
+            <span className="step-number" aria-hidden="true">{index + 1}</span>
+            <div><strong>{step.title}</strong><p>{step.detail}</p></div>
           </li>
         ))}
       </ol>
@@ -70,7 +70,7 @@ function InvestigationPanel({ finding, decision, onReview }: InvestigationPanelP
             <p className="help-text" role="status">{reviewDecisionLabels[decision]}. Review choices are local and reset on reload; no files or labels are changed.</p>
           </>
         ) : (
-          <p className="help-text">Load demo findings and select an issue to inspect its evidence here.</p>
+          <p className="help-text">Select a finding to inspect its evidence here.</p>
         )}
       </div>
       {/* TODO (you): Implement the Investigator with the Agents SDK on the server. */}
