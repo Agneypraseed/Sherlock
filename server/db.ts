@@ -15,7 +15,7 @@ export async function migrate(pool: Pool) {
     // Serialize concurrent migration commands; schema changes happen once.
     await client.query('SELECT pg_advisory_xact_lock(73104812)')
     await client.query('CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())')
-    for (const version of ['001_datasets', '002_image_uploads']) {
+    for (const version of ['001_datasets', '002_image_uploads', '003_image_relative_paths']) {
       const applied = await client.query('SELECT version FROM schema_migrations WHERE version = $1', [version])
       if (applied.rowCount === 0) {
         const sql = await readFile(new URL(`./migrations/${version}.sql`, import.meta.url), 'utf8')
@@ -44,12 +44,13 @@ export async function createDataset(pool: Pool, input: CreateDatasetRequest): Pr
     )
     const images = input.images.map((image, position) => ({
       id: randomUUID(), position, filename: image.filename,
+      relative_path: image.relativePath ?? image.filename,
       byte_size: image.byteSize, mime_type: image.mimeType,
     }))
     await client.query(
-      `INSERT INTO images (id, dataset_id, position, filename, byte_size, mime_type)
-       SELECT image.id, $1, image.position, image.filename, image.byte_size, image.mime_type
-       FROM jsonb_to_recordset($2::jsonb) AS image(id uuid, position integer, filename text, byte_size bigint, mime_type text)`,
+      `INSERT INTO images (id, dataset_id, position, filename, relative_path, byte_size, mime_type)
+       SELECT image.id, $1, image.position, image.filename, image.relative_path, image.byte_size, image.mime_type
+       FROM jsonb_to_recordset($2::jsonb) AS image(id uuid, position integer, filename text, relative_path text, byte_size bigint, mime_type text)`,
       [id, JSON.stringify(images)],
     )
     await client.query('COMMIT')
@@ -81,10 +82,11 @@ export async function getDataset(pool: Pool, id: string): Promise<DatasetDetails
   const row = result.rows[0]
   if (!row) return null
   const stored = await pool.query<{
-    id: string; position: number; filename: string; byte_size: string; mime_type: string; uploaded_at: Date | null
-  }>('SELECT id, position, filename, byte_size, mime_type, uploaded_at FROM images WHERE dataset_id = $1 ORDER BY position', [id])
+    id: string; position: number; filename: string; relative_path: string; byte_size: string; mime_type: string; uploaded_at: Date | null
+  }>('SELECT id, position, filename, relative_path, byte_size, mime_type, uploaded_at FROM images WHERE dataset_id = $1 ORDER BY position', [id])
   const images = stored.rows.map((image) => ({
     id: image.id, position: image.position, filename: image.filename,
+    relativePath: image.relative_path,
     byteSize: Number(image.byte_size), mimeType: image.mime_type,
     uploadedAt: image.uploaded_at?.toISOString() ?? null,
     url: image.uploaded_at ? `/api/datasets/${id}/images/${image.id}` : null,

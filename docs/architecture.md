@@ -121,9 +121,10 @@ The current demo UI proves none of these ML or agent quality claims.
 
 ## Deployment path
 
-1. Implemented: local metadata API, PostgreSQL persistence, and the real frontend save request.
-2. Implement cloud upload/download with private objects, authentication, and
-   server-side validation. Use short-lived signed URLs and limits on file size/count.
+1. Implemented: local metadata API, PostgreSQL persistence, folder-aware local
+   uploads, and server-backed image previews.
+2. Replace local image storage with private cloud objects. Add authentication,
+   server-side ownership checks, signed URLs, and limits on file size/count.
 3. Implement and evaluate deterministic ML checks locally. Measure RAM and latency.
 4. Add one Investigator with read-oriented tools, structured recommendations,
    evidence validation, and explicit human review for proposed mutations.

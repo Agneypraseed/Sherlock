@@ -8,6 +8,8 @@ export const IMAGE_MIME_TYPES = [
 
 export interface ImageManifestEntry {
   filename: string
+  /** Relative folder path from a directory import; plain file picks use filename. */
+  relativePath?: string
   byteSize: number
   mimeType: string
 }

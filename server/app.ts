@@ -71,6 +71,11 @@ export function buildApp(pool: Pool, logger = false, uploadRoot?: string) {
                   not: { enum: ['.', '..'] },
                   allOf: [{ pattern: '\\S' }, { pattern: '^[^/\\\\\\u0000-\\u001f\\u007f]+$' }],
                 },
+                relativePath: {
+                  type: 'string', minLength: 1, maxLength: 1024,
+                  pattern: '^[^/\\\\\\u0000-\\u001f\\u007f]+(?:/[^/\\\\\\u0000-\\u001f\\u007f]+)*$',
+                  not: { pattern: '(^|/)\\.\\.?(/|$)' },
+                },
                 byteSize: { type: 'integer', minimum: 1, maximum: MAX_IMAGE_BYTES },
                 mimeType: { type: 'string', enum: IMAGE_MIME_TYPES },
               },

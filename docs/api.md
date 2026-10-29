@@ -12,8 +12,8 @@ Content type: `application/json`.
 {
   "name": "Wildlife training set",
   "images": [
-    { "filename": "cat.jpg", "byteSize": 184200, "mimeType": "image/jpeg" },
-    { "filename": "bird.png", "byteSize": 245100, "mimeType": "image/png" }
+    { "filename": "cat.jpg", "relativePath": "cats/train/cat.jpg", "byteSize": 184200, "mimeType": "image/jpeg" },
+    { "filename": "bird.png", "relativePath": "birds/bird.png", "byteSize": 245100, "mimeType": "image/png" }
   ]
 }
 ```
@@ -24,6 +24,9 @@ Constraints:
   Leading/trailing whitespace is trimmed before persistence.
 - Images: 1–1000 entries.
 - Filename: 1–255 characters, no folder paths/control characters, and not `.` or `..`.
+- Relative path: optional for single files (defaults to filename); for folders,
+  forward slashes separate names. Maximum 1024 characters; no absolute path,
+  backslashes, control characters, or `.`/`..` path components.
 - Byte size: integer from 1 through 104857600 (100 MiB).
 - Declared MIME type: JPEG, PNG, WebP, GIF, BMP, TIFF, AVIF, HEIC, or HEIF.
 - Unknown fields and incorrect JSON types are rejected, not coerced or silently removed.
@@ -51,7 +54,7 @@ and positions, not object-storage paths or image identities.
 ## GET /api/datasets/:id
 
 Returns the summary plus an ordered `images` array with `id`, `position`,
-`filename`, `byteSize`, `mimeType`, `uploadedAt` (null until uploaded), and `url`
+`filename`, `relativePath`, `byteSize`, `mimeType`, `uploadedAt` (null until uploaded), and `url`
 (null until uploaded). Summary status is derived from successful uploads. A malformed
 UUID returns `400`; a valid but absent UUID returns `404`. This supports retrieving
 saved metadata after the API process or browser restarts. There is no list/history

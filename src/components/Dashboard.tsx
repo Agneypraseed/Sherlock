@@ -54,7 +54,12 @@ function Dashboard() {
       if (!savedManifest.current) {
         savedManifest.current = await saveDataset({
           name: datasetName.trim(),
-          images: files.map((file) => ({ filename: file.name, byteSize: file.size, mimeType: file.type })),
+          images: files.map((file) => ({
+            filename: file.name,
+            relativePath: file.webkitRelativePath || file.name,
+            byteSize: file.size,
+            mimeType: file.type,
+          })),
         })
       }
       const existing = await getDataset(savedManifest.current.id)
@@ -100,6 +105,12 @@ function Dashboard() {
           setSaveState({ status: 'idle' })
         }}
         onSave={handleSaveDataset}
+        onReset={() => {
+          savedManifest.current = null
+          setFiles([])
+          setDatasetName('')
+          setSaveState({ status: 'idle' })
+        }}
       />
       {isDemo && <p className="review-summary" role="status">Demo review: {reviewedCount} of {findings.length} findings reviewed.</p>}
       <div className="dashboard-sections">

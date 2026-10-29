@@ -65,11 +65,13 @@ npm test
 
 ## Current behavior
 
-- Select image files, enter a dataset name, and choose **Upload dataset**.
+- Select files in several chooser batches or import a whole folder, enter a dataset name,
+  and choose **Upload dataset**. Remove individual files before uploading if needed.
 - First, PostgreSQL saves the manifest in a transaction. Then the browser uploads
   each file separately, in selection order, with progress measured by completed files.
-- The API stores originals under `.data/images/<image UUID>` and tracks upload
-  timestamps in PostgreSQL. User filenames are display metadata, never disk paths.
+- The API keeps each image's relative folder path in PostgreSQL, stores originals
+  under `.data/images/<image UUID>`, and tracks upload timestamps. User paths never
+  become disk paths.
 - Success displays previews fetched from the API and links to stored originals.
 - Status progresses from `awaiting_upload` to `uploading` to `ready`; ready means
   all files are stored, not that an audit has run.
@@ -135,6 +137,7 @@ manifest. Reloading also clears the in-memory resume reference.
 | `server/migrate.ts` | Runs schema migrations explicitly. |
 | `server/migrations/001_datasets.sql` | Creates datasets and image-manifest tables with constraints and a foreign key. |
 | `server/migrations/002_image_uploads.sql` | Adds each image's successful upload timestamp; existing metadata stays intact. |
+| `server/migrations/003_image_relative_paths.sql` | Backfills existing filenames and preserves folder paths for new imports. |
 | `server/uploads.ts` | Validates and persists image bytes, serializes retries, and serves originals. |
 | `server/datasets.test.ts` | Real database tests covering validation, atomicity, persistence, and errors. |
 | `scripts/local-db.ts` | Development-only PostgreSQL process with persistent local storage. |
