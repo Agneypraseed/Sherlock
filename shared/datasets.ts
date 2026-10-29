@@ -20,8 +20,19 @@ export interface CreateDatasetRequest {
 export interface DatasetRecord {
   id: string
   name: string
-  status: 'awaiting_upload'
+  status: 'awaiting_upload' | 'uploading' | 'ready'
   imageCount: number
   totalBytes: number
   createdAt: string
+}
+
+export interface StoredImage extends ImageManifestEntry {
+  id: string
+  position: number
+  uploadedAt: string | null
+  url: string | null
+}
+
+export interface DatasetDetails extends DatasetRecord {
+  images: StoredImage[]
 }

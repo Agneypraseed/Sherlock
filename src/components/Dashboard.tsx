@@ -4,7 +4,9 @@ import FindingsPanel from './FindingsPanel'
 import InvestigationPanel from './InvestigationPanel'
 import { demoFindings } from '../data/demoFindings'
 import type { DatasetSaveState, FindingFilter, ReviewDecision } from '../types'
-import { saveDataset } from '../api/datasets'
+import { getDataset, saveDataset, uploadImage } from '../api/datasets'
+import { IMAGE_MIME_TYPES, MAX_IMAGE_BYTES } from '../../shared/datasets'
+import type { DatasetRecord } from '../../shared/datasets'
 
 function Dashboard() {
   // Shared state lives in the nearest common parent of all three panels.
@@ -12,6 +14,8 @@ function Dashboard() {
   const [datasetName, setDatasetName] = useState('')
   const [saveState, setSaveState] = useState<DatasetSaveState>({ status: 'idle' })
   const requestPending = useRef(false)
+  // Retain the manifest after a partial failure so retry resumes this dataset.
+  const savedManifest = useRef<DatasetRecord | null>(null)
   const [isDemo, setIsDemo] = useState(false)
   const [filter, setFilter] = useState<FindingFilter>('all')
   const [selectedFindingId, setSelectedFindingId] = useState<string | null>(null)
@@ -30,6 +34,7 @@ function Dashboard() {
   }
 
   function handleFilesChange(nextFiles: File[]) {
+    savedManifest.current = null
     setFiles(nextFiles)
     setSaveState({ status: 'idle' })
     // Never let fictional findings appear to be results for newly selected files.
@@ -41,15 +46,30 @@ function Dashboard() {
     // The ref closes the gap before React renders the disabled submit button.
     if (requestPending.current || saveState.status === 'success') return
     requestPending.current = true
-    setSaveState({ status: 'saving' })
+    setSaveState({ status: 'saving', completed: 0, total: files.length })
     try {
-      const dataset = await saveDataset({
-        name: datasetName.trim(),
-        images: files.map((file) => ({ filename: file.name, byteSize: file.size, mimeType: file.type })),
-      })
+      const invalidFile = files.find((file) => file.size === 0 || file.size > MAX_IMAGE_BYTES
+        || !IMAGE_MIME_TYPES.some((type) => type === file.type))
+      if (invalidFile) throw new Error(`${invalidFile.name}: choose a supported image between 1 byte and 100 MiB.`)
+      if (!savedManifest.current) {
+        savedManifest.current = await saveDataset({
+          name: datasetName.trim(),
+          images: files.map((file) => ({ filename: file.name, byteSize: file.size, mimeType: file.type })),
+        })
+      }
+      const existing = await getDataset(savedManifest.current.id)
+      let completed = existing.images.filter((image) => image.uploadedAt).length
+      setSaveState({ status: 'saving', completed, total: files.length })
+      for (const image of existing.images) {
+        if (image.uploadedAt) continue
+        await uploadImage(existing.id, image.id, files[image.position])
+        completed += 1
+        setSaveState({ status: 'saving', completed, total: files.length })
+      }
+      const dataset = await getDataset(existing.id)
       setSaveState({ status: 'success', dataset })
     } catch (error) {
-      setSaveState({ status: 'error', message: error instanceof Error ? error.message : 'Could not save the dataset.' })
+      setSaveState({ status: 'error', message: error instanceof Error ? error.message : 'Could not upload the dataset. Please retry.' })
     } finally {
       requestPending.current = false
     }
@@ -75,6 +95,7 @@ function Dashboard() {
         saveState={saveState}
         onFilesChange={handleFilesChange}
         onNameChange={(name) => {
+          savedManifest.current = null
           setDatasetName(name)
           setSaveState({ status: 'idle' })
         }}

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { readFile } from 'node:fs/promises'
 import { Pool } from 'pg'
-import type { CreateDatasetRequest, DatasetRecord } from '../shared/datasets.ts'
+import type { CreateDatasetRequest, DatasetDetails, DatasetRecord } from '../shared/datasets.ts'
 
 export function createPool(connectionString = process.env.DATABASE_URL) {
   if (!connectionString) throw new Error('DATABASE_URL is required. Copy .env.example to .env and start PostgreSQL.')
@@ -9,17 +9,19 @@ export function createPool(connectionString = process.env.DATABASE_URL) {
 }
 
 export async function migrate(pool: Pool) {
-  const sql = await readFile(new URL('./migrations/001_datasets.sql', import.meta.url), 'utf8')
   const client = await pool.connect()
   try {
     await client.query('BEGIN')
     // Serialize concurrent migration commands; schema changes happen once.
     await client.query('SELECT pg_advisory_xact_lock(73104812)')
     await client.query('CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())')
-    const applied = await client.query('SELECT version FROM schema_migrations WHERE version = $1', ['001_datasets'])
-    if (applied.rowCount === 0) {
-      await client.query(sql)
-      await client.query('INSERT INTO schema_migrations (version) VALUES ($1)', ['001_datasets'])
+    for (const version of ['001_datasets', '002_image_uploads']) {
+      const applied = await client.query('SELECT version FROM schema_migrations WHERE version = $1', [version])
+      if (applied.rowCount === 0) {
+        const sql = await readFile(new URL(`./migrations/${version}.sql`, import.meta.url), 'utf8')
+        await client.query(sql)
+        await client.query('INSERT INTO schema_migrations (version) VALUES ($1)', [version])
+      }
     }
     await client.query('COMMIT')
   } catch (error) {
@@ -65,7 +67,7 @@ export async function createDataset(pool: Pool, input: CreateDatasetRequest): Pr
   }
 }
 
-export async function getDataset(pool: Pool, id: string): Promise<DatasetRecord | null> {
+export async function getDataset(pool: Pool, id: string): Promise<DatasetDetails | null> {
   const result = await pool.query<{
     id: string; name: string; status: 'awaiting_upload'; created_at: Date;
     image_count: number; total_bytes: string;
@@ -77,9 +79,22 @@ export async function getDataset(pool: Pool, id: string): Promise<DatasetRecord 
     [id],
   )
   const row = result.rows[0]
-  return row ? {
-    id: row.id, name: row.name, status: row.status,
+  if (!row) return null
+  const stored = await pool.query<{
+    id: string; position: number; filename: string; byte_size: string; mime_type: string; uploaded_at: Date | null
+  }>('SELECT id, position, filename, byte_size, mime_type, uploaded_at FROM images WHERE dataset_id = $1 ORDER BY position', [id])
+  const images = stored.rows.map((image) => ({
+    id: image.id, position: image.position, filename: image.filename,
+    byteSize: Number(image.byte_size), mimeType: image.mime_type,
+    uploadedAt: image.uploaded_at?.toISOString() ?? null,
+    url: image.uploaded_at ? `/api/datasets/${id}/images/${image.id}` : null,
+  }))
+  const uploadedCount = images.filter((image) => image.uploadedAt).length
+  return {
+    id: row.id, name: row.name,
+    status: uploadedCount === images.length ? 'ready' : uploadedCount > 0 ? 'uploading' : 'awaiting_upload',
     imageCount: row.image_count, totalBytes: Number(row.total_bytes),
     createdAt: row.created_at.toISOString(),
-  } : null
+    images,
+  }
 }

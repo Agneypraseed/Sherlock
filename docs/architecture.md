@@ -2,7 +2,8 @@
 
 The React UI and Node/Fastify metadata API now run locally with PostgreSQL.
 `POST /api/datasets` saves a manifest atomically; `GET /api/datasets/:id` reads it.
-Cloud resources, byte uploads, deployment, embeddings, and the agent remain planned.
+Local byte uploads now store originals in `.data/images`; cloud resources,
+deployment, embeddings, and the agent remain planned.
 See [the implemented API contract](api.md) and the README for local setup.
 
 ## Recommended stack

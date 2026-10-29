@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict'
 import { randomUUID } from 'node:crypto'
+import { mkdtemp, readdir, rmdir, unlink } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import test from 'node:test'
 import { Pool } from 'pg'
 import { buildApp } from './app.ts'
@@ -12,9 +15,10 @@ test('Dataset API against PostgreSQL', async (t) => {
   assert.ok(connectionString, 'Set DATABASE_URL or TEST_DATABASE_URL and start PostgreSQL before running tests.')
   // A unique schema keeps test writes and cleanup away from application data.
   const schema = `test_${randomUUID().replaceAll('-', '')}`
+  const uploadRoot = await mkdtemp(join(tmpdir(), 'sherlock-uploads-'))
   const admin = new Pool({ connectionString, connectionTimeoutMillis: 5000 })
   const pool = new Pool({ connectionString, options: `-c search_path=${schema}`, connectionTimeoutMillis: 5000 })
-  const app = buildApp(pool)
+  const app = buildApp(pool, false, uploadRoot)
   t.after(async () => {
     await app.close()
     await pool.end()
@@ -23,6 +27,9 @@ test('Dataset API against PostgreSQL', async (t) => {
       await admin.query(`DROP SCHEMA IF EXISTS ${schema} CASCADE`)
     } finally {
       await admin.end()
+      // Remove only entries in the unique directory created by this test.
+      for (const filename of await readdir(uploadRoot)) await unlink(join(uploadRoot, filename))
+      await rmdir(uploadRoot)
     }
   })
   await admin.query(`CREATE SCHEMA ${schema}`)
@@ -60,7 +67,10 @@ test('Dataset API against PostgreSQL', async (t) => {
     try {
       const response = await restartedApp.inject({ method: 'GET', url: `/api/datasets/${created.id}` })
       assert.equal(response.statusCode, 200)
-      assert.deepEqual(response.json(), created)
+      const { images, ...summary } = response.json()
+      assert.deepEqual(summary, created)
+      assert.equal(images.length, 2)
+      assert.equal(images[0].uploadedAt, null)
     } finally {
       await restartedApp.close()
     }
@@ -114,7 +124,7 @@ test('Dataset API against PostgreSQL', async (t) => {
 
   await t.test('migration can be rerun without changing existing data', async () => {
     await migrate(pool)
-    assert.equal((await pool.query('SELECT count(*)::integer AS count FROM schema_migrations')).rows[0].count, 1)
+    assert.equal((await pool.query('SELECT count(*)::integer AS count FROM schema_migrations')).rows[0].count, 2)
     assert.equal((await pool.query('SELECT count(*)::integer AS count FROM datasets')).rows[0].count, 1)
   })
 
@@ -142,6 +152,46 @@ test('Dataset API against PostgreSQL', async (t) => {
     } finally {
       await unavailableApp.close()
       await unavailablePool.end()
+    }
+  })
+
+  await t.test('uploads persist, invalid bytes are rejected, and partial uploads can resume', async () => {
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64')
+    const createdResponse = await app.inject({ method: 'POST', url: '/api/datasets', payload: {
+      name: 'Upload test', images: [0, 1].map(() => ({ filename: 'same.png', byteSize: png.length, mimeType: 'image/png' })),
+    } })
+    const id = createdResponse.json().id
+    const details = (await app.inject(`/api/datasets/${id}`)).json()
+    const first = `/api/datasets/${id}/images/${details.images[0].id}`
+    const second = `/api/datasets/${id}/images/${details.images[1].id}`
+    const put = (url: string, payload: Buffer) => app.inject({ method: 'PUT', url, headers: { 'content-type': 'application/octet-stream' }, payload })
+    assert.equal((await app.inject(first)).statusCode, 404)
+    assert.equal((await put(first, png.subarray(1))).statusCode, 400, 'Wrong size rejected')
+    assert.equal((await put(first, Buffer.alloc(png.length))).statusCode, 400, 'Spoofed image rejected')
+    assert.equal((await app.inject({ method: 'PUT', url: first, headers: {
+      'content-type': 'application/octet-stream', 'content-length': String(MAX_IMAGE_BYTES + 1),
+    }, payload: png })).statusCode, 413, 'Oversized upload rejected before buffering')
+    assert.equal((await put(`/api/datasets/${randomUUID()}/images/${details.images[0].id}`, png)).statusCode, 404)
+    assert.equal((await put(first, png)).statusCode, 204)
+    assert.equal((await app.inject(`/api/datasets/${id}`)).json().status, 'uploading')
+    assert.equal((await put(second, Buffer.alloc(png.length))).statusCode, 400)
+    const changedBytes = Buffer.from(png)
+    changedBytes[changedBytes.length - 1] ^= 1
+    assert.equal((await put(first, changedBytes)).statusCode, 204, 'Retry cannot replace an uploaded original')
+    assert.equal((await put(second, png)).statusCode, 204)
+    const restarted = buildApp(pool, false, uploadRoot)
+    try {
+      const persisted = (await restarted.inject(`/api/datasets/${id}`)).json()
+      assert.equal(persisted.status, 'ready')
+      assert.ok(persisted.images.every((image: { uploadedAt: string }) => image.uploadedAt))
+      const original = await restarted.inject(persisted.images[0].url)
+      assert.equal(original.statusCode, 200)
+      assert.equal(original.headers['content-type'], 'image/png')
+      assert.equal(original.headers['x-content-type-options'], 'nosniff')
+      assert.deepEqual(original.rawPayload, png)
+      assert.equal((await readdir(uploadRoot)).length, 2, 'No temporary files or duplicate retry files')
+    } finally {
+      await restarted.close()
     }
   })
 })

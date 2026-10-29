@@ -1,9 +1,9 @@
-import type { DatasetRecord } from '../shared/datasets'
+import type { DatasetDetails } from '../shared/datasets'
 
 export type DatasetSaveState =
   | { status: 'idle' }
-  | { status: 'saving' }
-  | { status: 'success'; dataset: DatasetRecord }
+  | { status: 'saving'; completed: number; total: number }
+  | { status: 'success'; dataset: DatasetDetails }
   | { status: 'error'; message: string }
 
 export type FindingKind = 'duplicate' | 'label-conflict' | 'outlier'

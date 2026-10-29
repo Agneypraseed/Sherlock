@@ -1,7 +1,7 @@
 # DatasetSherlock
 
 A learn-by-building image dataset auditing workbench. The React interface and
-first metadata API are implemented. Image-byte uploads, ML analysis, tool calling,
+dataset API and local image uploads are implemented. ML analysis, tool calling,
 and the Investigator Agent remain future work that you will own.
 
 ## Local setup
@@ -65,21 +65,25 @@ npm test
 
 ## Current behavior
 
-- Select image files, enter a dataset name, and save the image manifest.
-- The request sends filenames, byte sizes, and MIME types, not file bytes.
-- PostgreSQL saves the dataset and all image records in a single transaction.
-- Success displays the dataset ID and `awaiting_upload` status. No audit runs.
+- Select image files, enter a dataset name, and choose **Upload dataset**.
+- First, PostgreSQL saves the manifest in a transaction. Then the browser uploads
+  each file separately, in selection order, with progress measured by completed files.
+- The API stores originals under `.data/images/<image UUID>` and tracks upload
+  timestamps in PostgreSQL. User filenames are display metadata, never disk paths.
+- Success displays previews fetched from the API and links to stored originals.
+- Status progresses from `awaiting_upload` to `uploading` to `ready`; ready means
+  all files are stored, not that an audit has run.
 - The UI shows loading/errors, preserves the draft on failure, and prevents repeat
   submission of an unchanged successfully saved draft.
-- Editing the name or selection resets the save state. A new save creates a new
+- Editing the name or selection resets the save state. A new upload creates a new
   dataset; this form does not update an existing record.
-- Reloading clears the local draft and demo reviews. Saved metadata remains in
-  PostgreSQL and can be retrieved using `GET /api/datasets/:id`.
+- Reloading clears the local draft and demo reviews. Metadata and originals persist
+  locally and can be retrieved through the API. A saved-dataset history UI is still TODO.
 - Demo findings remain explicitly fictional. They are unrelated to selected files
   or saved metadata. The investigation plan is static and invokes no model.
 
-The API validates declared metadata. It cannot verify image content until actual
-bytes are uploaded and decoded. It is currently a local development API with no
+The API checks declared metadata, actual byte length, and container signatures.
+Full decoding, dimensions, and corrupt-image detection are still TODO. It is a local development API with no
 user authentication or ownership checks. Add those before hosting it for users.
 
 ## Important React state
@@ -107,9 +111,11 @@ updated disabled button. Another ref clears the browser-managed file input.
 Neither ref is rendered state. Review decisions still use functional immutable
 updates so changing one finding does not discard other decisions.
 
-There are no automatic request retries or server-side idempotency keys yet. A
-manual retry after an ambiguous network failure can create a second record;
-this is a later reliability improvement, distinct from disabling double clicks.
+Another ref retains the server's manifest ID after a partial failure. Retry reloads
+the manifest and uploads only missing files. PUT is safe to repeat for an already
+uploaded image. There are no automatic retries or POST idempotency keys: if the
+initial creation succeeds but its response is lost, retry can still create another
+manifest. Reloading also clears the in-memory resume reference.
 
 ## Source guide
 
@@ -128,6 +134,8 @@ this is a later reliability improvement, distinct from disabling double clicks.
 | `server/index.ts` | Starts the API and closes connections on shutdown. Defaults to loopback. |
 | `server/migrate.ts` | Runs schema migrations explicitly. |
 | `server/migrations/001_datasets.sql` | Creates datasets and image-manifest tables with constraints and a foreign key. |
+| `server/migrations/002_image_uploads.sql` | Adds each image's successful upload timestamp; existing metadata stays intact. |
+| `server/uploads.ts` | Validates and persists image bytes, serializes retries, and serves originals. |
 | `server/datasets.test.ts` | Real database tests covering validation, atomicity, persistence, and errors. |
 | `scripts/local-db.ts` | Development-only PostgreSQL process with persistent local storage. |
 | `.env.example` | Documented local connection settings; copy to ignored `.env`. |
@@ -145,4 +153,4 @@ includes a platform-specific database binary; production uses managed PostgreSQL
 No agent or ML libraries are installed.
 
 See [the API contract](docs/api.md) and [the architecture plan](docs/architecture.md).
-The next functional boundary is uploading bytes into private object storage.
+See [the upload milestone explanation](docs/uploads.md) for the request flow and limitations.

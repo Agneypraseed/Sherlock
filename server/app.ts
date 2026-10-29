@@ -3,6 +3,7 @@ import type { Pool } from 'pg'
 import { createDataset, getDataset } from './db.ts'
 import { IMAGE_MIME_TYPES, MAX_IMAGES, MAX_IMAGE_BYTES } from '../shared/datasets.ts'
 import type { CreateDatasetRequest } from '../shared/datasets.ts'
+import { registerUploads } from './uploads.ts'
 
 const datasetResponseSchema = {
   type: 'object', additionalProperties: false,
@@ -15,7 +16,7 @@ const datasetResponseSchema = {
   },
 }
 
-export function buildApp(pool: Pool, logger = false) {
+export function buildApp(pool: Pool, logger = false, uploadRoot?: string) {
   const app = Fastify({
     logger,
     bodyLimit: 1024 * 1024,
@@ -40,7 +41,7 @@ export function buildApp(pool: Pool, logger = false) {
     if (error.statusCode && error.statusCode >= 400 && error.statusCode < 500) {
       return reply.code(error.statusCode).send({ error: {
         code: 'INVALID_REQUEST',
-        message: error.statusCode === 413 ? 'The image manifest is too large.' : 'Send a valid JSON request.',
+        message: error.statusCode === 413 ? 'The request exceeds the size limit (100 MiB per image; 1 MiB per manifest).' : 'Send a valid request with the expected content type.',
       } })
     }
     request.log.error({ err: error }, 'Dataset request failed')
@@ -90,7 +91,6 @@ export function buildApp(pool: Pool, logger = false) {
         type: 'object', required: ['id'],
         properties: { id: { type: 'string', format: 'uuid' } },
       },
-      response: { 200: datasetResponseSchema },
     },
   }, async (request, reply) => {
     const dataset = await getDataset(pool, request.params.id)
@@ -98,5 +98,6 @@ export function buildApp(pool: Pool, logger = false) {
     return dataset
   })
 
+  registerUploads(app, pool, uploadRoot)
   return app
 }

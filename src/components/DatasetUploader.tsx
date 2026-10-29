@@ -23,9 +23,9 @@ function DatasetUploader({ files, name, saveState, onFilesChange, onNameChange, 
       <div className="section-heading">
         <div>
           <h2 id="dataset-upload-heading">Dataset</h2>
-          <p>Name your dataset and save its image manifest.</p>
+          <p>Name your dataset and upload its images.</p>
         </div>
-        <span className="status-label">Metadata only</span>
+        <span className="status-label">Local storage</span>
       </div>
 
       <form onSubmit={(event) => { event.preventDefault(); void onSave() }} aria-busy={isSaving}>
@@ -96,27 +96,40 @@ function DatasetUploader({ files, name, saveState, onFilesChange, onNameChange, 
                 )}
               </div>
               <p id="file-selection-help" className="help-text">
-                Image contents stay in your browser. Only metadata is saved.
+                Images are saved on this computer. Uploading does not run an audit.
               </p>
             </div>
             <button type="submit" disabled={!name.trim() || files.length === 0 || files.length > MAX_IMAGES || saveState.status === 'success'}>
-              {isSaving ? 'Saving metadata…' : saveState.status === 'success' ? <><Icon name="check" size={17} />Metadata saved</> : 'Save dataset metadata'}
+              {isSaving ? 'Uploading…' : saveState.status === 'success' ? <><Icon name="check" size={17} />Images uploaded</> : saveState.status === 'error' ? 'Retry upload' : 'Upload dataset'}
             </button>
           </div>
         </fieldset>
       </form>
 
-      {saveState.status === 'saving' && <p role="status" className="request-feedback help-text">Saving your dataset metadata…</p>}
+      {saveState.status === 'saving' && <div role="status" className="request-feedback help-text">
+        <p>Uploaded {saveState.completed} of {saveState.total} images. Keep this page open until the upload finishes.</p>
+        <progress value={saveState.completed} max={saveState.total} aria-label="Image upload progress" />
+      </div>}
       {saveState.status === 'error' && <p role="alert" className="error-message">{saveState.message}</p>}
       {saveState.status === 'success' && (
         <div role="status" className="save-success">
           <strong>{saveState.dataset.name} saved</strong>
-          <p>{saveState.dataset.imageCount} image records saved. Status: awaiting upload.</p>
+          <p>{saveState.dataset.imageCount} {saveState.dataset.imageCount === 1 ? 'image' : 'images'} uploaded and saved.</p>
           <p className="help-text">Dataset ID: <code>{saveState.dataset.id}</code></p>
-          <p className="help-text">Image contents have not been uploaded or analyzed.</p>
+          <p className="help-text">Open a preview to view the stored original. Analysis comes next.</p>
+          <ul className="uploaded-images" aria-label="Uploaded images">
+            {saveState.dataset.images.map((image) => <li key={image.id}>
+              <a href={image.url ?? undefined} target="_blank" rel="noreferrer">
+                {['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'].includes(image.mimeType)
+                  ? <img src={image.url ?? undefined} alt={image.filename} loading="lazy" />
+                  : <span className="help-text">Preview unavailable for this format</span>}
+                <span>{image.filename}</span>
+              </a>
+            </li>)}
+          </ul>
         </div>
       )}
-      {/* TODO (you): Validate actual image contents and upload bytes to private storage. */}
+      {/* TODO (you): Add image decoding checks, dataset analysis, and evidence-backed findings. */}
     </section>
   )
 }
