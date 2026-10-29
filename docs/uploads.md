@@ -1,5 +1,8 @@
 # Milestone: real local image upload
 
+This describes the first upload milestone. Saved-dataset reopening, appends and
+full image decoding now extend it; see [the current workflow](datasets-and-intake.md).
+
 Add images in multiple chooser batches, import a whole folder, or remove a file
 from the selection before upload. Duplicate selections are skipped. Folder
 imports preserve relative paths such as `cats/train_01.jpg`, which lets later
@@ -22,7 +25,8 @@ on this computer after the browser or API restarts. `.data` is ignored by Git.
 Separate file requests give failures a small scope. If file 3 fails, files 1–2
 remain stored. Retry reads upload timestamps and skips completed files. Changing
 the selection or dataset name starts a new draft. Refreshing clears this form and
-its resume reference; a dataset history screen is a future milestone.
+its browser File objects. The saved-dataset list now reopens the persisted record
+and allows reselection of missing files or appending new paths.
 
 ## Files and responsibilities
 
@@ -55,8 +59,8 @@ submission is a user action. No state library or upload dependency was added.
 
 ## Deliberate limits and TODOs
 
-- Container signatures identify formats; they do not prove an entire file decodes.
-  TODO: full decoding, dimensions, corrupt-image reporting, and decompression limits.
+- Full decoding, dimensions and corruption reporting are now implemented with a
+  25-million-pixel limit. The current supported-format list is in the workflow above.
 - Upload requests buffer at most 100 MiB each. The browser sends them sequentially.
   Multiple clients can still use significant memory. TODO before hosting: streaming,
   concurrency limits, quotas, authentication, ownership, and private cloud storage.

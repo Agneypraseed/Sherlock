@@ -2,8 +2,11 @@ import { useRef, useState } from 'react'
 import { IMAGE_MIME_TYPES, MAX_IMAGES } from '../../shared/datasets'
 import type { DatasetSaveState } from '../types'
 import Icon from './Icon'
+import type { DatasetDetails } from '../../shared/datasets'
 
 interface DatasetUploaderProps {
+  existingDataset: DatasetDetails | null
+  loading: boolean
   files: File[]
   name: string
   saveState: DatasetSaveState
@@ -13,7 +16,7 @@ interface DatasetUploaderProps {
   onReset: () => void
 }
 
-function DatasetUploader({ files, name, saveState, onFilesChange, onNameChange, onSave, onReset }: DatasetUploaderProps) {
+function DatasetUploader({ existingDataset, loading, files, name, saveState, onFilesChange, onNameChange, onSave, onReset }: DatasetUploaderProps) {
   const inputRef = useRef<HTMLInputElement>(null)
   const folderInputRef = useRef<HTMLInputElement>(null)
   const [selectionNotice, setSelectionNotice] = useState('')
@@ -24,15 +27,23 @@ function DatasetUploader({ files, name, saveState, onFilesChange, onNameChange, 
   function addFiles(incoming: File[]) {
     const accepted = incoming.filter((file) => IMAGE_MIME_TYPES.some((type) => type === file.type))
     const ignoredCount = incoming.length - accepted.length
-    const merged = new Map(files.map((file) => [fileKey(file), file]))
-    const countBefore = merged.size
-    for (const file of accepted) merged.set(fileKey(file), file)
-    const addedCount = merged.size - countBefore
-    const duplicateCount = accepted.length - addedCount
-    if (addedCount > 0) onFilesChange(Array.from(merged.values()))
+    const merged = new Map(files.map((file) => [file.webkitRelativePath || file.name, file]))
+    let duplicateCount = 0
+    let replacedCount = 0
+    let addedCount = 0
+    for (const file of accepted) {
+      const path = file.webkitRelativePath || file.name
+      const previous = merged.get(path)
+      if (previous && fileKey(previous) === fileKey(file)) { duplicateCount++; continue }
+      if (previous) replacedCount++
+      else addedCount++
+      merged.set(path, file)
+    }
+    if (addedCount > 0 || replacedCount > 0) onFilesChange(Array.from(merged.values()))
     setSelectionNotice([
       ignoredCount > 0 ? `${ignoredCount} unsupported ${ignoredCount === 1 ? 'file was' : 'files were'} skipped.` : '',
       duplicateCount > 0 ? `${duplicateCount} already-selected ${duplicateCount === 1 ? 'image was' : 'images were'} skipped.` : '',
+      replacedCount > 0 ? `${replacedCount} pending ${replacedCount === 1 ? 'selection was' : 'selections were'} updated at the same path.` : '',
     ].filter(Boolean).join(' '))
   }
 
@@ -40,20 +51,21 @@ function DatasetUploader({ files, name, saveState, onFilesChange, onNameChange, 
     <section id="dataset-upload" aria-labelledby="dataset-upload-heading">
       <div className="section-heading">
         <div>
-          <h2 id="dataset-upload-heading">Dataset</h2>
-          <p>Add images in batches or choose a folder, then upload once.</p>
+          <h2 id="dataset-upload-heading">{existingDataset ? 'Add or resume images' : 'New dataset'}</h2>
+          <p>{existingDataset ? 'Add new paths or reselect missing files to continue this dataset.' : 'Add images in batches or choose a folder, then upload.'}</p>
         </div>
         <span className="status-label">Local storage</span>
       </div>
 
       <form onSubmit={(event) => { event.preventDefault(); void onSave() }} aria-busy={isSaving}>
-        <fieldset className="dataset-fields" disabled={isSaving || saveState.status === 'success'}>
+        <fieldset className="dataset-fields" disabled={isSaving || loading}>
           <div className="dataset-form-grid">
             <div>
               <label className="file-label" htmlFor="dataset-name">Dataset name</label>
               <input
                 id="dataset-name"
                 type="text"
+                disabled={Boolean(existingDataset)}
                 value={name}
                 required
                 maxLength={120}
@@ -69,7 +81,7 @@ function DatasetUploader({ files, name, saveState, onFilesChange, onNameChange, 
                     id="dataset-files"
                     ref={inputRef}
                     type="file"
-                    accept="image/*"
+                    accept={IMAGE_MIME_TYPES.join(',')}
                     multiple
                     aria-describedby="file-limits file-selection-help"
                     onChange={(event) => {
@@ -95,7 +107,7 @@ function DatasetUploader({ files, name, saveState, onFilesChange, onNameChange, 
                     className="visually-hidden-file-input"
                     type="file"
                     multiple
-                    accept="image/*"
+                    accept={IMAGE_MIME_TYPES.join(',')}
                     aria-describedby="file-limits file-selection-help"
                     onChange={(event) => {
                       const selected = Array.from(event.currentTarget.files ?? [])
@@ -148,11 +160,11 @@ function DatasetUploader({ files, name, saveState, onFilesChange, onNameChange, 
               </div>
               {selectionNotice && <p className="selection-notice" role="status">{selectionNotice}</p>}
               <p id="file-selection-help" className="help-text">
-                Images are saved on this computer. Uploading does not run an audit.
+                Up to 100 MiB and 25 megapixels per image. JPEG, PNG, WebP, static GIF, single-page TIFF, or AVIF. Uploading does not run an audit.
               </p>
             </div>
-            <button type="submit" disabled={!name.trim() || files.length === 0 || files.length > MAX_IMAGES || saveState.status === 'success'}>
-              {isSaving ? 'Uploading…' : saveState.status === 'success' ? <><Icon name="check" size={17} />Images uploaded</> : saveState.status === 'error' ? 'Retry upload' : 'Upload dataset'}
+            <button type="submit" disabled={!name.trim() || files.length === 0 || files.length > MAX_IMAGES}>
+              {isSaving ? 'Uploading…' : saveState.status === 'error' ? 'Retry upload' : existingDataset ? 'Upload selected images' : 'Upload dataset'}
             </button>
           </div>
         </fieldset>
@@ -166,26 +178,16 @@ function DatasetUploader({ files, name, saveState, onFilesChange, onNameChange, 
       {saveState.status === 'success' && (
         <div role="status" className="save-success">
           <strong>{saveState.dataset.name} saved</strong>
-          <p>{saveState.dataset.imageCount} {saveState.dataset.imageCount === 1 ? 'image' : 'images'} uploaded and saved.</p>
+          <p>{saveState.dataset.uploadedCount} of {saveState.dataset.imageCount} images uploaded. You can add more to this dataset.</p>
           <p className="help-text">Dataset ID: <code>{saveState.dataset.id}</code></p>
           <p className="help-text">Open a preview to view the stored original. Analysis comes next.</p>
-          <ul className="uploaded-images" aria-label="Uploaded images">
-            {saveState.dataset.images.map((image) => <li key={image.id}>
-              <a href={image.url ?? undefined} target="_blank" rel="noreferrer">
-                {['image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp'].includes(image.mimeType)
-                  ? <img src={image.url ?? undefined} alt={image.relativePath} loading="lazy" />
-                  : <span className="help-text">Preview unavailable for this format</span>}
-                <span>{image.relativePath}</span>
-              </a>
-            </li>)}
-          </ul>
           <button type="button" className="secondary-button new-dataset-button" onClick={() => {
             setSelectionNotice('')
             onReset()
           }}>Start another dataset</button>
         </div>
       )}
-      {/* TODO (you): Add image decoding checks, dataset analysis, and evidence-backed findings. */}
+      {/* TODO (you): Add deterministic dataset analysis and evidence-backed findings. */}
     </section>
   )
 }

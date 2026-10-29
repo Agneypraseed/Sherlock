@@ -15,7 +15,7 @@ export async function migrate(pool: Pool) {
     // Serialize concurrent migration commands; schema changes happen once.
     await client.query('SELECT pg_advisory_xact_lock(73104812)')
     await client.query('CREATE TABLE IF NOT EXISTS schema_migrations (version text PRIMARY KEY, applied_at timestamptz NOT NULL DEFAULT now())')
-    for (const version of ['001_datasets', '002_image_uploads', '003_image_relative_paths']) {
+    for (const version of ['001_datasets', '002_image_uploads', '003_image_relative_paths', '004_image_validation']) {
       const applied = await client.query('SELECT version FROM schema_migrations WHERE version = $1', [version])
       if (applied.rowCount === 0) {
         const sql = await readFile(new URL(`./migrations/${version}.sql`, import.meta.url), 'utf8')
@@ -56,7 +56,7 @@ export async function createDataset(pool: Pool, input: CreateDatasetRequest): Pr
     await client.query('COMMIT')
     return {
       id, name: dataset.rows[0].name, status: 'awaiting_upload',
-      imageCount: images.length,
+      imageCount: images.length, uploadedCount: 0,
       totalBytes: input.images.reduce((sum, image) => sum + image.byteSize, 0),
       createdAt: dataset.rows[0].created_at.toISOString(),
     }
@@ -82,20 +82,24 @@ export async function getDataset(pool: Pool, id: string): Promise<DatasetDetails
   const row = result.rows[0]
   if (!row) return null
   const stored = await pool.query<{
-    id: string; position: number; filename: string; relative_path: string; byte_size: string; mime_type: string; uploaded_at: Date | null
-  }>('SELECT id, position, filename, relative_path, byte_size, mime_type, uploaded_at FROM images WHERE dataset_id = $1 ORDER BY position', [id])
+    id: string; position: number; filename: string; relative_path: string; byte_size: string; mime_type: string; uploaded_at: Date | null;
+    width: number | null; height: number | null; format: string | null; verified_at: Date | null; validation_error: string | null
+  }>('SELECT * FROM images WHERE dataset_id = $1 ORDER BY position', [id])
   const images = stored.rows.map((image) => ({
     id: image.id, position: image.position, filename: image.filename,
     relativePath: image.relative_path,
     byteSize: Number(image.byte_size), mimeType: image.mime_type,
     uploadedAt: image.uploaded_at?.toISOString() ?? null,
-    url: image.uploaded_at ? `/api/datasets/${id}/images/${image.id}` : null,
+    url: image.uploaded_at && image.verified_at && !image.validation_error ? `/api/datasets/${id}/images/${image.id}` : null,
+    width: image.width, height: image.height, format: image.format,
+    verifiedAt: image.verified_at?.toISOString() ?? null, validationError: image.validation_error,
   }))
   const uploadedCount = images.filter((image) => image.uploadedAt).length
   return {
     id: row.id, name: row.name,
-    status: uploadedCount === images.length ? 'ready' : uploadedCount > 0 ? 'uploading' : 'awaiting_upload',
-    imageCount: row.image_count, totalBytes: Number(row.total_bytes),
+    status: images.some((image) => image.validationError) ? 'needs_attention'
+      : images.every((image) => image.verifiedAt) ? 'ready' : uploadedCount > 0 ? 'uploading' : 'awaiting_upload',
+    imageCount: row.image_count, uploadedCount, totalBytes: Number(row.total_bytes),
     createdAt: row.created_at.toISOString(),
     images,
   }

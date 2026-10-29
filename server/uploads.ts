@@ -1,28 +1,13 @@
 import { randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { mkdir, rename, unlink, writeFile, stat } from 'node:fs/promises'
+import { mkdir, rename, unlink, writeFile, stat, readFile } from 'node:fs/promises'
 import { join, resolve } from 'node:path'
 import type { FastifyInstance } from 'fastify'
 import type { Pool } from 'pg'
 import { MAX_IMAGE_BYTES } from '../shared/datasets.ts'
-
-// Check container signatures, not filenames. Full decoding and dimensions are a later milestone.
-function hasImageSignature(bytes: Buffer, mime: string): boolean {
-  const hex = bytes.subarray(0, 16).toString('hex')
-  const text = (start: number, end: number) => bytes.toString('ascii', start, end)
-  switch (mime) {
-    case 'image/png': return hex.startsWith('89504e470d0a1a0a')
-    case 'image/jpeg': return hex.startsWith('ffd8ff')
-    case 'image/gif': return ['GIF87a', 'GIF89a'].includes(text(0, 6))
-    case 'image/webp': return text(0, 4) === 'RIFF' && text(8, 12) === 'WEBP'
-    case 'image/bmp': return text(0, 2) === 'BM'
-    case 'image/tiff': return hex.startsWith('49492a00') || hex.startsWith('4d4d002a')
-    case 'image/avif': return text(4, 8) === 'ftyp' && ['avif', 'avis'].includes(text(8, 12))
-    case 'image/heic': return text(4, 8) === 'ftyp' && ['heic', 'heix', 'hevc', 'hevx'].includes(text(8, 12))
-    case 'image/heif': return text(4, 8) === 'ftyp' && ['mif1', 'msf1', 'heic', 'heix'].includes(text(8, 12))
-    default: return false
-  }
-}
+import { inspectImage, InvalidImageError } from './image-intake.ts'
+import { datasetParams } from './dataset-schema.ts'
+import { getDataset } from './db.ts'
 
 const paramsSchema = {
   type: 'object', required: ['id', 'imageId'],
@@ -44,8 +29,8 @@ export function registerUploads(app: FastifyInstance, pool: Pool, root = resolve
     try {
       await client.query('BEGIN')
       // Serialize attempts for this image; successful uploads are immutable on retry.
-      const result = await client.query<{ id: string; byte_size: string; mime_type: string; uploaded_at: Date | null }>(
-        'SELECT id, byte_size, mime_type, uploaded_at FROM images WHERE dataset_id = $1 AND id = $2 FOR UPDATE',
+      const result = await client.query<{ id: string; byte_size: string; mime_type: string; uploaded_at: Date | null; verified_at: Date | null; validation_error: string | null }>(
+        'SELECT id, byte_size, mime_type, uploaded_at, verified_at, validation_error FROM images WHERE dataset_id = $1 AND id = $2 FOR UPDATE',
         [request.params.id, request.params.imageId],
       )
       const image = result.rows[0]
@@ -53,17 +38,26 @@ export function registerUploads(app: FastifyInstance, pool: Pool, root = resolve
         await client.query('ROLLBACK')
         return reply.code(404).send({ error: { code: 'IMAGE_NOT_FOUND', message: 'Image record not found.' } })
       }
-      if (request.body.length !== Number(image.byte_size) || !hasImageSignature(request.body, image.mime_type)) {
+      if (request.body.length !== Number(image.byte_size)) {
         await client.query('ROLLBACK')
         return reply.code(400).send({ error: { code: 'INVALID_IMAGE', message: 'The file size or image format does not match its metadata. Choose a valid image file.' } })
       }
-      if (!image.uploaded_at) {
+      if (!image.uploaded_at || image.validation_error) {
+        let decoded
+        try { decoded = await inspectImage(request.body, image.mime_type) }
+        catch (error) {
+          if (!(error instanceof InvalidImageError)) throw error
+          await client.query('UPDATE images SET validation_error=$2, verified_at=now() WHERE id=$1', [image.id, error.message])
+          await client.query('COMMIT')
+          return reply.code(400).send({ error: { code: 'INVALID_IMAGE', message: error.message } })
+        }
         await mkdir(root, { recursive: true })
         temporaryPath = join(root, `${image.id}.${randomUUID()}.tmp`)
         await writeFile(temporaryPath, request.body, { flag: 'wx' })
         await rename(temporaryPath, join(root, image.id))
         temporaryPath = undefined
-        await client.query('UPDATE images SET uploaded_at = now() WHERE id = $1', [image.id])
+        await client.query(`UPDATE images SET uploaded_at=now(), width=$2, height=$3, format=$4,
+          verified_at=now(), validation_error=NULL WHERE id=$1`, [image.id, decoded.width, decoded.height, decoded.format])
       }
       await client.query('COMMIT')
       return reply.code(204).send()
@@ -80,7 +74,7 @@ export function registerUploads(app: FastifyInstance, pool: Pool, root = resolve
     schema: { params: paramsSchema },
   }, async (request, reply) => {
     const result = await pool.query<{ id: string; mime_type: string }>(
-      'SELECT id, mime_type FROM images WHERE dataset_id = $1 AND id = $2 AND uploaded_at IS NOT NULL',
+      'SELECT id, mime_type FROM images WHERE dataset_id = $1 AND id = $2 AND uploaded_at IS NOT NULL AND verified_at IS NOT NULL AND validation_error IS NULL',
       [request.params.id, request.params.imageId],
     )
     const image = result.rows[0]
@@ -89,5 +83,31 @@ export function registerUploads(app: FastifyInstance, pool: Pool, root = resolve
     await stat(path) // Surface missing storage as a service error before sending headers.
     return reply.type(image.mime_type).header('X-Content-Type-Options', 'nosniff')
       .header('Cache-Control', 'no-store').send(createReadStream(path))
+  })
+
+  // Explicitly validate originals saved by versions that only checked signatures.
+  app.post<{ Params: { id: string } }>('/api/datasets/:id/validate', { schema: { params: datasetParams } }, async (request, reply) => {
+    const dataset = await getDataset(pool, request.params.id)
+    if (!dataset) return reply.code(404).send({ error: { code: 'DATASET_NOT_FOUND', message: 'Dataset not found.' } })
+    for (const image of dataset.images.filter((entry) => entry.uploadedAt && !entry.verifiedAt)) {
+      const client = await pool.connect()
+      try {
+        await client.query('BEGIN')
+        const locked = await client.query('SELECT uploaded_at, verified_at FROM images WHERE id=$1 FOR UPDATE', [image.id])
+        if (!locked.rows[0]?.uploaded_at || locked.rows[0]?.verified_at) { await client.query('COMMIT'); continue }
+        try {
+          const bytes = await readFile(join(root, image.id))
+          if (bytes.length !== image.byteSize) throw new InvalidImageError('Stored file size does not match its metadata. Reselect the original to repair it.')
+          const decoded = await inspectImage(bytes, image.mimeType)
+          await client.query('UPDATE images SET width=$2,height=$3,format=$4,verified_at=now(),validation_error=NULL WHERE id=$1', [image.id, decoded.width, decoded.height, decoded.format])
+        } catch (error) {
+          const message = error instanceof InvalidImageError ? error.message : 'The stored file is unavailable. Reselect the original to repair it.'
+          await client.query('UPDATE images SET verified_at=now(),validation_error=$2 WHERE id=$1', [image.id, message])
+        }
+        await client.query('COMMIT')
+      } catch (error) { await client.query('ROLLBACK'); throw error }
+      finally { client.release() }
+    }
+    return getDataset(pool, request.params.id)
   })
 }

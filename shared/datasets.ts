@@ -2,8 +2,7 @@
 export const MAX_IMAGES = 1000
 export const MAX_IMAGE_BYTES = 100 * 1024 * 1024
 export const IMAGE_MIME_TYPES = [
-  'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/bmp',
-  'image/tiff', 'image/avif', 'image/heic', 'image/heif',
+  'image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/tiff', 'image/avif',
 ] as const
 
 export interface ImageManifestEntry {
@@ -22,8 +21,9 @@ export interface CreateDatasetRequest {
 export interface DatasetRecord {
   id: string
   name: string
-  status: 'awaiting_upload' | 'uploading' | 'ready'
+  status: 'awaiting_upload' | 'uploading' | 'ready' | 'needs_attention'
   imageCount: number
+  uploadedCount: number
   totalBytes: number
   createdAt: string
 }
@@ -33,6 +33,11 @@ export interface StoredImage extends ImageManifestEntry {
   position: number
   uploadedAt: string | null
   url: string | null
+  width: number | null
+  height: number | null
+  format: string | null
+  verifiedAt: string | null
+  validationError: string | null
 }
 
 export interface DatasetDetails extends DatasetRecord {

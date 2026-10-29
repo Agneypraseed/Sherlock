@@ -221,3 +221,12 @@ dd { margin: 0; color: #334d3c; overflow-wrap: anywhere; }
 .uploaded-images a { display: grid; gap: 8px; overflow-wrap: anywhere; font-size: 13px; }
 .uploaded-images img { width: 100%; height: 110px; object-fit: contain; border-radius: 8px; background: #f0f3f1; }
 progress { width: min(100%, 360px); accent-color: #2e624c; }
+.dataset-library { margin-bottom: 18px; }
+.dataset-list, .stored-images { list-style: none; margin: 0; padding: 0; max-height: 320px; overflow-y: auto; }
+.dataset-list li { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); }
+.dataset-list li > div, .stored-images li > div { display: grid; min-width: 0; gap: 3px; overflow-wrap: anywhere; }
+.dataset-list strong, .stored-images strong { font-size: 14px; }
+.stored-dataset { margin-top: 22px; }
+.stored-images li { display: flex; align-items: center; gap: 14px; padding: 10px 0; border-bottom: 1px solid var(--border); }
+.stored-images img { width: 64px; height: 64px; object-fit: contain; border-radius: 6px; background: #f0f3f1; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }

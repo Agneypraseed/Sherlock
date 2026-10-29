@@ -1,17 +1,20 @@
 import Fastify, { type FastifyError } from 'fastify'
 import type { Pool } from 'pg'
 import { createDataset, getDataset } from './db.ts'
-import { IMAGE_MIME_TYPES, MAX_IMAGES, MAX_IMAGE_BYTES } from '../shared/datasets.ts'
 import type { CreateDatasetRequest } from '../shared/datasets.ts'
 import { registerUploads } from './uploads.ts'
+import { appendImages, DatasetRequestError, listDatasets } from './dataset-management.ts'
+import { datasetBody, datasetParams, imagesSchema } from './dataset-schema.ts'
+import type { ImageManifestEntry } from '../shared/datasets.ts'
 
 const datasetResponseSchema = {
   type: 'object', additionalProperties: false,
-  required: ['id', 'name', 'status', 'imageCount', 'totalBytes', 'createdAt'],
+  required: ['id', 'name', 'status', 'imageCount', 'uploadedCount', 'totalBytes', 'createdAt'],
   properties: {
     id: { type: 'string' }, name: { type: 'string' },
     status: { type: 'string', const: 'awaiting_upload' },
     imageCount: { type: 'integer' }, totalBytes: { type: 'integer' },
+    uploadedCount: { type: 'integer' },
     createdAt: { type: 'string' },
   },
 }
@@ -25,12 +28,15 @@ export function buildApp(pool: Pool, logger = false, uploadRoot?: string) {
   })
 
   app.setErrorHandler<FastifyError>((error, request, reply) => {
+    if (error instanceof DatasetRequestError) return reply.code(error.statusCode).send({ error: { code: 'DATASET_REQUEST_FAILED', message: error.message } })
     if (error.validation) {
       const path = error.validation[0]?.instancePath ?? ''
       const message = path.endsWith('/mimeType')
-        ? 'An image has an unsupported or missing file type. Choose JPEG, PNG, WebP, GIF, BMP, TIFF, AVIF, HEIC, or HEIF files.'
+        ? 'Unsupported image type. Choose JPEG, PNG, WebP, static GIF, single-page TIFF, or AVIF. BMP and HEIC/HEIF are not supported.'
         : path.endsWith('/byteSize')
           ? 'Each image must have a whole-number size greater than zero and no larger than 100 MiB.'
+          : path.endsWith('/relativePath')
+            ? 'Use a relative folder path up to 1024 characters, without empty, dot, or parent-directory components.'
           : path.endsWith('/filename')
             ? 'Each image needs a filename of 1–255 characters, without folder paths or control characters.'
             : path === '/name'
@@ -51,38 +57,16 @@ export function buildApp(pool: Pool, logger = false, uploadRoot?: string) {
     } })
   })
 
+  app.get('/api/datasets', async () => listDatasets(pool))
+  app.post<{ Params: { id: string }; Body: { images: ImageManifestEntry[] } }>('/api/datasets/:id/images', {
+    schema: { params: datasetParams, body: {
+      type: 'object', additionalProperties: false, required: ['images'], properties: { images: imagesSchema },
+    } },
+  }, async (request) => appendImages(pool, request.params.id, request.body.images))
+
   app.post<{ Body: CreateDatasetRequest }>('/api/datasets', {
     schema: {
-      body: {
-        type: 'object', additionalProperties: false, required: ['name', 'images'],
-        properties: {
-          name: {
-            type: 'string', minLength: 1, maxLength: 120,
-            allOf: [{ pattern: '\\S' }, { pattern: '^[^\\u0000-\\u001f\\u007f]+$' }],
-          },
-          images: {
-            type: 'array', minItems: 1, maxItems: MAX_IMAGES,
-            items: {
-              type: 'object', additionalProperties: false,
-              required: ['filename', 'byteSize', 'mimeType'],
-              properties: {
-                filename: {
-                  type: 'string', minLength: 1, maxLength: 255,
-                  not: { enum: ['.', '..'] },
-                  allOf: [{ pattern: '\\S' }, { pattern: '^[^/\\\\\\u0000-\\u001f\\u007f]+$' }],
-                },
-                relativePath: {
-                  type: 'string', minLength: 1, maxLength: 1024,
-                  pattern: '^[^/\\\\\\u0000-\\u001f\\u007f]+(?:/[^/\\\\\\u0000-\\u001f\\u007f]+)*$',
-                  not: { pattern: '(^|/)\\.\\.?(/|$)' },
-                },
-                byteSize: { type: 'integer', minimum: 1, maximum: MAX_IMAGE_BYTES },
-                mimeType: { type: 'string', enum: IMAGE_MIME_TYPES },
-              },
-            },
-          },
-        },
-      },
+      body: datasetBody,
       response: { 201: datasetResponseSchema },
     },
   }, async (request, reply) => {

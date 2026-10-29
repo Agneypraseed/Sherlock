@@ -3,12 +3,14 @@ import { randomUUID } from 'node:crypto'
 import { mkdtemp, readdir, rmdir, unlink } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import sharp from 'sharp'
 import test from 'node:test'
 import { Pool } from 'pg'
 import { buildApp } from './app.ts'
 import { createDataset, migrate } from './db.ts'
 import { MAX_IMAGES, MAX_IMAGE_BYTES } from '../shared/datasets.ts'
 import type { CreateDatasetRequest, DatasetRecord } from '../shared/datasets.ts'
+import { inspectImage } from './image-intake.ts'
 
 test('Dataset API against PostgreSQL', async (t) => {
   const connectionString = process.env.TEST_DATABASE_URL ?? process.env.DATABASE_URL
@@ -124,7 +126,7 @@ test('Dataset API against PostgreSQL', async (t) => {
 
   await t.test('migration can be rerun without changing existing data', async () => {
     await migrate(pool)
-    assert.equal((await pool.query('SELECT count(*)::integer AS count FROM schema_migrations')).rows[0].count, 2)
+    assert.equal((await pool.query('SELECT count(*)::integer AS count FROM schema_migrations')).rows[0].count, 4)
     assert.equal((await pool.query('SELECT count(*)::integer AS count FROM datasets')).rows[0].count, 1)
   })
 
@@ -156,7 +158,7 @@ test('Dataset API against PostgreSQL', async (t) => {
   })
 
   await t.test('uploads persist, invalid bytes are rejected, and partial uploads can resume', async () => {
-    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=', 'base64')
+    const png = await sharp({ create: { width: 2, height: 3, channels: 3, background: 'red' } }).png().toBuffer()
     const createdResponse = await app.inject({ method: 'POST', url: '/api/datasets', payload: {
       name: 'Upload test', images: [0, 1].map(() => ({ filename: 'same.png', byteSize: png.length, mimeType: 'image/png' })),
     } })
@@ -193,5 +195,84 @@ test('Dataset API against PostgreSQL', async (t) => {
     } finally {
       await restarted.close()
     }
+  })
+
+  await t.test('lists, reopens, appends and repairs a dataset without losing existing originals', async () => {
+    const png = await sharp({ create: { width: 7, height: 5, channels: 3, background: 'blue' } }).png().toBuffer()
+    const entry = { filename: 'one.png', relativePath: 'cats/one.png', byteSize: png.length, mimeType: 'image/png' }
+    const created = (await app.inject({ method: 'POST', url: '/api/datasets', payload: { name: 'Resume and extend', images: [entry] } })).json()
+    let details = (await app.inject(`/api/datasets/${created.id}`)).json()
+    const firstId = details.images[0].id
+    const put = (imageId: string, payload: Buffer) => app.inject({ method: 'PUT', url: `/api/datasets/${created.id}/images/${imageId}`, headers: { 'content-type': 'application/octet-stream' }, payload })
+    const corrupt = Buffer.from(png); corrupt.fill(0, 20)
+    assert.equal((await put(firstId, corrupt)).statusCode, 400, 'Signature-valid corrupt pixels must be rejected')
+    details = (await app.inject(`/api/datasets/${created.id}`)).json()
+    assert.equal(details.status, 'needs_attention')
+    assert.match(details.images[0].validationError, /decode/)
+    assert.equal(details.images[0].url, null)
+    assert.equal((await put(firstId, png)).statusCode, 204)
+    const second = { ...entry, filename: 'two.png', relativePath: 'dogs/two.png' }
+    const append = () => app.inject({ method: 'POST', url: `/api/datasets/${created.id}/images`, payload: { images: [second] } })
+    assert.equal((await append()).statusCode, 200)
+    assert.equal((await append()).json().imageCount, 2, 'Lost-response retry cannot duplicate manifest rows')
+    const reopened = buildApp(pool, false, uploadRoot)
+    try {
+      details = (await reopened.inject(`/api/datasets/${created.id}`)).json()
+      assert.equal(details.images[0].id, firstId)
+      assert.equal(details.images[0].width, 7)
+      assert.equal(details.images[0].height, 5)
+      assert.equal(details.images[1].uploadedAt, null)
+      assert.equal((await put(details.images[1].id, png)).statusCode, 204)
+      const list = (await reopened.inject('/api/datasets')).json()
+      const summary = list.find((dataset: DatasetRecord) => dataset.id === created.id)
+      assert.equal(summary.imageCount, 2); assert.equal(summary.uploadedCount, 2); assert.equal(summary.status, 'ready')
+      const conflict = await app.inject({ method: 'POST', url: `/api/datasets/${created.id}/images`, payload: { images: [{ ...entry, byteSize: png.length + 1 }] } })
+      assert.equal(conflict.statusCode, 409)
+      assert.deepEqual((await app.inject(details.images[0].url)).rawPayload, png)
+      // Revalidation upgrades originals stored by older signature-only versions.
+      await pool.query('UPDATE images SET verified_at=NULL,width=NULL,height=NULL WHERE dataset_id=$1', [created.id])
+      const validated = (await app.inject({ method: 'POST', url: `/api/datasets/${created.id}/validate` })).json()
+      assert.equal(validated.status, 'ready'); assert.equal(validated.images[0].width, 7)
+    } finally { await reopened.close() }
+  })
+
+  await t.test('fully decodes supported formats and rejects unsupported declarations and MIME mismatches', async () => {
+    for (const [format, mime] of [['png', 'image/png'], ['jpeg', 'image/jpeg'], ['webp', 'image/webp'], ['gif', 'image/gif'], ['tiff', 'image/tiff'], ['avif', 'image/avif']] as const) {
+      const bytes = await sharp({ create: { width: 8, height: 6, channels: 3, background: 'green' } }).toFormat(format).toBuffer()
+      const created = (await app.inject({ method: 'POST', url: '/api/datasets', payload: {
+        name: `Decode ${format}`, images: [{ filename: `test.${format}`, byteSize: bytes.length, mimeType: mime }],
+      } })).json()
+      const details = (await app.inject(`/api/datasets/${created.id}`)).json()
+      const upload = await app.inject({ method: 'PUT', url: `/api/datasets/${created.id}/images/${details.images[0].id}`, headers: { 'content-type': 'application/octet-stream' }, payload: bytes })
+      assert.equal(upload.statusCode, 204, `${format}: ${upload.body}`)
+      const saved = (await app.inject(`/api/datasets/${created.id}`)).json()
+      assert.equal(saved.images[0].width, 8); assert.equal(saved.images[0].height, 6)
+    }
+    const unsupported = await app.inject({ method: 'POST', url: '/api/datasets', payload: { name: 'Unsupported', images: [{ filename: 'test.bmp', byteSize: 40, mimeType: 'image/bmp' }] } })
+    assert.equal(unsupported.statusCode, 400)
+    assert.match(unsupported.json().error.message, /not supported/)
+    const bytes = await sharp({ create: { width: 8, height: 6, channels: 3, background: 'green' } }).png().toBuffer()
+    const wrong = (await app.inject({ method: 'POST', url: '/api/datasets', payload: { name: 'Wrong MIME', images: [{ filename: 'test.jpg', byteSize: bytes.length, mimeType: 'image/jpeg' }] } })).json()
+    const imageId = (await app.inject(`/api/datasets/${wrong.id}`)).json().images[0].id
+    const mismatch = await app.inject({ method: 'PUT', url: `/api/datasets/${wrong.id}/images/${imageId}`, headers: { 'content-type': 'application/octet-stream' }, payload: bytes })
+    assert.equal(mismatch.statusCode, 400); assert.match(mismatch.json().error.message, /does not match/)
+  })
+
+  await t.test('rejects animated and over-limit images before accepting their pixels', async () => {
+    const single = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64')
+    const animated = Buffer.concat([single.subarray(0, -1), single.subarray(single.indexOf(0x2c))])
+    await assert.rejects(inspectImage(animated, 'image/gif'), /Animated and multi-page/)
+    const huge = await sharp({ create: { width: 5001, height: 5000, channels: 3, background: 'white' } }).png().toBuffer()
+    await assert.rejects(inspectImage(huge, 'image/png'), /25-megapixel/)
+  })
+
+  await t.test('concurrent append requests cannot exceed the dataset image limit', async () => {
+    const entry = { filename: 'one.png', byteSize: 10, mimeType: 'image/png' }
+    const created = (await app.inject({ method: 'POST', url: '/api/datasets', payload: {
+      name: 'Count limit', images: Array.from({ length: MAX_IMAGES - 1 }, (_, index) => ({ ...entry, relativePath: `cats/${index}.png` })),
+    } })).json()
+    const responses = await Promise.all(['a', 'b'].map((name) => app.inject({ method: 'POST', url: `/api/datasets/${created.id}/images`, payload: { images: [{ ...entry, relativePath: `cats/${name}.png` }] } })))
+    assert.deepEqual(responses.map((response) => response.statusCode).sort(), [200, 409])
+    assert.equal((await app.inject(`/api/datasets/${created.id}`)).json().imageCount, MAX_IMAGES)
   })
 })

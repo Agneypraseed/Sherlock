@@ -73,19 +73,21 @@ npm test
   under `.data/images/<image UUID>`, and tracks upload timestamps. User paths never
   become disk paths.
 - Success displays previews fetched from the API and links to stored originals.
-- Status progresses from `awaiting_upload` to `uploading` to `ready`; ready means
-  all files are stored, not that an audit has run.
+- Status progresses from `awaiting_upload` to `uploading` to `ready`; rejected files
+  produce `needs_attention`. Ready means all files passed decoding. No audit has run.
 - The UI shows loading/errors, preserves the draft on failure, and prevents repeat
   submission of an unchanged successfully saved draft.
-- Editing the name or selection resets the save state. A new upload creates a new
-  dataset; this form does not update an existing record.
-- Reloading clears the local draft and demo reviews. Metadata and originals persist
-  locally and can be retrieved through the API. A saved-dataset history UI is still TODO.
+- Open a saved dataset to add images or resume missing files. Appending reuses image
+  IDs for the same paths, preserves valid originals, and enforces the total count limit.
+- Refresh reopens the dataset in the URL. Reselect original files/folders for pending
+  uploads; the browser does not retain File objects. New dataset starts a separate record.
 - Demo findings remain explicitly fictional. They are unrelated to selected files
   or saved metadata. The investigation plan is static and invokes no model.
 
-The API checks declared metadata, actual byte length, and container signatures.
-Full decoding, dimensions, and corrupt-image detection are still TODO. It is a local development API with no
+The API checks declared metadata, actual byte length, format, and full decoding.
+Width/height/format and validation errors are saved. Limits are 25 megapixels and
+100 MiB per image. Open old uploads and choose **Validate stored images** to decode
+originals saved by older versions. It is a local development API with no
 user authentication or ownership checks. Add those before hosting it for users.
 
 ## Important React state
@@ -113,11 +115,11 @@ updated disabled button. Another ref clears the browser-managed file input.
 Neither ref is rendered state. Review decisions still use functional immutable
 updates so changing one finding does not discard other decisions.
 
-Another ref retains the server's manifest ID after a partial failure. Retry reloads
-the manifest and uploads only missing files. PUT is safe to repeat for an already
-uploaded image. There are no automatic retries or POST idempotency keys: if the
-initial creation succeeds but its response is lost, retry can still create another
-manifest. Reloading also clears the in-memory resume reference.
+The selected dataset is server-backed state, separate from local files waiting to
+upload. The URL restores its ID after refresh. An effect loads saved records on
+mount; submit handlers create/append/upload on user action. A generation counter
+prevents stale open responses overwriting a newer selection. See
+[the management/intake walkthrough](docs/datasets-and-intake.md) for the full flow.
 
 ## Source guide
 
@@ -125,6 +127,7 @@ manifest. Reloading also clears the in-memory resume reference.
 | --- | --- |
 | `src/components/Dashboard.tsx` | Draft/request state, derived findings, and panel coordination. |
 | `src/components/DatasetUploader.tsx` | Name/file form and idle/loading/success/error presentation. |
+| `src/components/DatasetLibrary.tsx` | Saved-dataset list, reopening, stored-image dimensions and validation feedback. |
 | `src/components/FindingsPanel.tsx` | Demo filters, selection, and review status. |
 | `src/components/InvestigationPanel.tsx` | Static investigation plan and illustrative evidence. |
 | `src/components/Icon.tsx` | Small accessible SVG icons shared by the header, file picker, and empty states. |
@@ -138,6 +141,9 @@ manifest. Reloading also clears the in-memory resume reference.
 | `server/migrations/001_datasets.sql` | Creates datasets and image-manifest tables with constraints and a foreign key. |
 | `server/migrations/002_image_uploads.sql` | Adds each image's successful upload timestamp; existing metadata stays intact. |
 | `server/migrations/003_image_relative_paths.sql` | Backfills existing filenames and preserves folder paths for new imports. |
+| `server/migrations/004_image_validation.sql` | Records dimensions, format, validation time and decode errors. |
+| `server/dataset-management.ts`, `server/dataset-schema.ts` | List/append logic, locking, path conflicts and runtime request schemas. |
+| `server/image-intake.ts` | Bounded full decoding using Sharp; no audit algorithm is implemented here. |
 | `server/uploads.ts` | Validates and persists image bytes, serializes retries, and serves originals. |
 | `server/datasets.test.ts` | Real database tests covering validation, atomicity, persistence, and errors. |
 | `scripts/local-db.ts` | Development-only PostgreSQL process with persistent local storage. |
